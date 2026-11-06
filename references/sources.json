@@ -1,0 +1,32 @@
+{
+  "note": "Hashes of the official CVPR 2027 sources this skill's rules were written from. scripts/refresh_sources.py re-fetches them and reports changes.",
+  "guidelines": {
+    "url": "https://cvpr.thecvf.com/Conferences/2027/AuthorGuidelines",
+    "retrieved": "2026-11-06",
+    "sha256_text": "0b136e1db252bdfdf429fb029034d1ea5cc8e3586ae880a4a61a5b292cb6d063"
+  },
+  "dates": {
+    "url": "https://cvpr.thecvf.com/Conferences/2027/Dates",
+    "retrieved": "2026-11-06",
+    "sha256_text": "3964feacd98ed9e027e911b36509e8ea5e86feee0cc861e6f2b41ad7e7f0116a"
+  },
+  "author_kit": {
+    "url": "https://media.eventhosts.cc/Conferences/CVPR2027/author-kit-CVPR2027-v1-latex.zip",
+    "retrieved": "2026-11-06",
+    "sha256_zip": "da1ec5db9b73531ea82a87723e4aedb631083331fe655d1972279b48a7bdb2fe",
+    "sha256_cvpr_sty": "1cd7f434b13d41c475df4a1901a5d82d9ca8b80b8cf6205dc4602a5c164286b4",
+    "sha256_bst": "e38e6166bd7b1e6d23a1b79dcdb55c656e4fcdbe91bdf6b50d827e6b5d1aacfc",
+    "provides_package": "2027 LaTeX class for IEEE CVPR"
+  },
+  "deadlines_aoe": {
+    "paper_registration": "2026-11-10",
+    "paper_submission": "2026-11-16",
+    "supplementary": "2026-11-23",
+    "reviews_released": "2027-01-25",
+    "final_decisions": "2027-02-25"
+  },
+  "conference": {
+    "workshops": "2027-06-20/21",
+    "main": "2027-06-22/25"
+  }
+}

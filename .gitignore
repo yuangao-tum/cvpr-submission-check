@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# outputs and private inputs never belong here
+cvpr_check_out/
+check_out*/
+identity*.txt
