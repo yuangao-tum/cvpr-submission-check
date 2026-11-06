@@ -55,7 +55,7 @@ JSON versions of both, and a cache of the API answers so that a re-run is fast. 
 
 `--identity` is a private file with one term per line: author names, institutions, lab and vehicle names, grant IDs,
 e-mail domains, GitHub user names. **Keep it, and the reports on your paper, out of public repositories.** The
-reference check sends only the cited works' titles and arXiv IDs to the public indexes.
+reference check sends only the cited works' titles and arXiv IDs to the public indexes, and opens the URLs cited in non-paper entries.
 
 ## Limits
 
