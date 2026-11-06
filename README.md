@@ -61,8 +61,11 @@ reference check sends only the cited works' titles and arXiv IDs to the public i
 
 - The page check reads the PDF text, not its geometry: look at the last page of the main text yourself.
 - The hidden-text check catches the usual LaTeX constructs and phrases, not every possible trick.
-- DBLP may refuse automated clients (bot check). The checker then skips DBLP for the run and reports that. OpenAlex
-  and Crossref still cover the titles.
+- DBLP may refuse automated clients (bot check), and OpenAlex gives clients without a key a daily budget (set
+  `OPENALEX_API_KEY` to a free key to raise it). An index that refuses is skipped for the rest of the run and reported.
+  Entries not found while an index was unavailable are `UNCHECKED`, not `NOT_FOUND`: re-run later (cached answers are
+  reused) or confirm them by hand. arXiv title search and Crossref remain as fallbacks.
+- `NON_PAPER` entries (model cards, blogs, repositories) are checked by fetching their URL (HTTP status and page title).
 - `NOT_FOUND` does not prove that a reference is fabricated, and `VERIFIED` does not prove that the bib entry is
   complete. Confirm the flagged entries by hand.
 

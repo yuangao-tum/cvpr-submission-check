@@ -29,7 +29,8 @@ The rules come from the official CVPR 2027 sources, read on 2026-11-06 and summa
    - `NOT_FOUND` references: open the work (DOI, arXiv, publisher page) and confirm it exists and the entry matches.
      Citations to non-existent work are a desk-rejection reason. Fix titles that were misspelled, then re-run.
    - `CHECK_METADATA`: correct the first author or year in the bib, or confirm the difference (e.g. arXiv v1 year).
-   - `NON_PAPER` (model cards, laws, websites): confirm each by hand.
+   - `UNCHECKED`: an index refused during the lookup (rate limit, daily budget); re-run later or confirm by hand.
+   - `NON_PAPER` (model cards, laws, websites): the report shows each URL's HTTP status and title; confirm each by hand.
    - `PUBLISHED`: an arXiv-only entry has a peer-reviewed version; prefer citing it.
 6. **Go through the MANUAL rows** with the authors (OpenReview profiles and enrollment by the registration deadline,
    reciprocal-reviewer quota, author list, dual submission, human subjects, dataset release, societal impact,

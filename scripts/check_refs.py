@@ -7,12 +7,16 @@ Statuses per entry:
   NOT_FOUND        no source has this title: confirm by hand that the work exists (fabricated citations are a
                    desk-rejection reason)
   NON_PAPER        @misc/@manual/@online/@software entry not found in paper indexes (model cards, laws, websites):
-                   confirm by hand
+                   confirm by hand; if the entry has a URL, the page is fetched and its HTTP status and title reported
+  UNCHECKED        not found, but an index refused or failed during the lookup (rate limit, daily budget, network):
+                   re-run later (answers are cached) or confirm by hand
 Extra flag: PUBLISHED   the entry cites arXiv but OpenAlex or DBLP lists a peer-reviewed version (consider citing it).
 
-Only metadata of the cited works (titles, IDs) is sent to the public APIs; nothing from the paper itself.
+Only metadata of the cited works (titles, IDs, URLs) is sent to the public APIs; nothing from the paper itself.
+OpenAlex limits clients without a key to a daily budget; set OPENALEX_API_KEY (free key) to raise it.
 """
 import json
+import os
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -63,11 +67,14 @@ def _json(http, url, host):
     if host in UNAVAILABLE:
         return None
     body = http.get(url)
+    if body is None and host in http.failed and re.match(r"429", http.failed[host]):
+        UNAVAILABLE.add(host)
+        print(f"  {host}: {http.failed[host][:100]}; skipping it for this run", flush=True)
     if not body:
         return None
     if body.lstrip().startswith("<"):
         UNAVAILABLE.add(host)
-        http.cache.pop(url, None)
+        http.cache.pop(re.sub(r"[&?](api_key|mailto)=[^&]*", "", url), None)
         http._save()
         print(f"  {host} answered with HTML (bot check?); skipping it for this run", flush=True)
         return None
@@ -90,6 +97,37 @@ def q_arxiv(http, aid):
     return None
 
 
+def q_arxiv_title(http, title):
+    words = norm_text(title).split()[:14]
+    if len(words) < 2:
+        return []
+    body = http.get("https://export.arxiv.org/api/query?max_results=5&search_query="
+                    + urllib.parse.quote("ti:\"" + " ".join(words) + "\""))
+    if not body:
+        return []
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    res = []
+    for ent in ET.fromstring(body).findall("a:entry", ns):
+        t = " ".join((ent.findtext("a:title", "", ns) or "").split())
+        aid = (ent.findtext("a:id", "", ns) or "").rsplit("/", 1)[-1]
+        res.append({"source": f"arXiv {aid}", "title": t, "year": (ent.findtext("a:published", "", ns) or "")[:4],
+                    "authors": [a.findtext("a:name", "", ns) for a in ent.findall("a:author", ns)], "venue": "arXiv"})
+    return res
+
+
+def check_url(http, url):
+    """Fetch a cited web page; return 'HTTP <status>: <title>' (the status of a failure is reported, not raised)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; cvpr-submission-check/1.0)"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            head = r.read(200_000).decode("utf-8", errors="replace")
+            t = re.search(r"(?is)<title[^>]*>(.*?)</title>", head)
+            return f"HTTP {r.status}: {' '.join(t.group(1).split())[:90] if t else '(no title)'}"
+    except Exception as e:  # noqa: BLE001
+        return f"failed: {str(e)[:90]}"
+
+
 def q_dblp(http, title):
     data = _json(http, "https://dblp.org/search/publ/api?format=json&h=8&q=" + urllib.parse.quote(norm_text(title)[:200]), "dblp.org")
     if not data:
@@ -109,7 +147,9 @@ def q_dblp(http, title):
 
 
 def q_openalex(http, title):
-    data = _json(http, "https://api.openalex.org/works?per-page=5&search=" + urllib.parse.quote(norm_text(title)[:200]), "api.openalex.org")
+    key = os.environ.get("OPENALEX_API_KEY")
+    url = "https://api.openalex.org/works?per-page=5&search=" + urllib.parse.quote(norm_text(title)[:200])
+    data = _json(http, url + (f"&api_key={urllib.parse.quote(key)}" if key else ""), "api.openalex.org")
     if not data:
         return []
     res = []
@@ -145,8 +185,9 @@ def best(cands, title):
 
 def author_ok(e, cand):
     names = bib_authors(e.get("author", "") or e.get("editor", ""))
-    if not names:
-        return True
+    if not names or re.search(r"\b(team|inc|corp\w*|labs?|google|openai|nvidia|meta|deepmind|anthropic|alibaba|"
+                              r"qwen|moonshot|mistral|microsoft|waymo)\b", names[0], re.I) and (names[0].startswith("{") or " " in delatex(names[0]).strip()):
+        return True  # corporate or team author: no person to compare
     s = surname(names[0])
     pool = [norm_text(a) for a in cand.get("authors", [])[:5]]
     return bool(s) and any(s in p.split() or s == p or (len(s) > 6 and s in p) for p in pool)
@@ -188,11 +229,24 @@ def check_entry(http, key, e):
             if is_arxiv_only(e) and pub and not r["published"]:
                 r["published"] = f"{pub[0]['venue']} {pub[0]['year']} ({pub[0]['source']})"
         if not cands:
+            sim, c = best(q_arxiv_title(http, title), title)
+            if c and sim >= MATCH:
+                cands.append((sim, c))
+        if not cands:
             sim, c = best(q_crossref(http, title), title)
             if c and sim >= MATCH:
                 cands.append((sim, c))
     if not cands:
-        r["status"] = "NON_PAPER" if e["_type"] in NON_PAPER_TYPES else "NOT_FOUND"
+        url = re.search(r"https?://[^\s}]+", " ".join(e.get(f, "") for f in ("url", "howpublished", "note")))
+        if e["_type"] in NON_PAPER_TYPES or url:
+            r["status"] = "NON_PAPER"
+            if url:
+                r["notes"].append(f"{url.group(0)} -> {check_url(http, url.group(0))}")
+        elif UNAVAILABLE or http.failed:
+            r["status"] = "UNCHECKED"
+            r["notes"].append("index unavailable during lookup: " + ", ".join(sorted(UNAVAILABLE | set(http.failed))))
+        else:
+            r["status"] = "NOT_FOUND"
         return r
     sim, c = max(cands, key=lambda x: x[0])
     r.update(found=c["source"], found_title=c["title"], found_year=c.get("year", ""), found_venue=c.get("venue", ""),
@@ -225,15 +279,16 @@ def run(args, tex_rows, out_dir):
     write_md(results, missing, Path(out_dir) / "refs_report.md")
     count = lambda s: [r for r in results if r["status"] == s]  # noqa: E731
     out = []
-    nf, np_, cm = count("NOT_FOUND"), count("NON_PAPER"), count("CHECK_METADATA")
+    nf, np_, cm, un = count("NOT_FOUND"), count("NON_PAPER"), count("CHECK_METADATA"), count("UNCHECKED")
     if UNAVAILABLE:
         out.append(finding("I1", "INFO", "Indexes that refused automated access in this run", sorted(UNAVAILABLE)))
-    out.append(finding("I1", "FAIL" if nf or missing else ("WARN" if cm or np_ else "PASS"),
+    out.append(finding("I1", "FAIL" if nf or missing else ("WARN" if cm or np_ or un else "PASS"),
                        f"Every cited reference exists ({len(count('VERIFIED'))}/{len(results)} verified automatically; see refs_report.md)",
                        [f"cited key without bib entry: {k}" for k in missing]
                        + [f"NOT_FOUND {r['key']}: \"{r['title'][:100]}\" ({r['year']})" for r in nf]
                        + [f"CHECK_METADATA {r['key']}: {'; '.join(r['notes'])}" for r in cm]
-                       + [f"NON_PAPER {r['key']}: \"{r['title'][:100]}\" (confirm by hand)" for r in np_]))
+                       + [f"UNCHECKED {r['key']}: \"{r['title'][:100]}\" ({'; '.join(r['notes'])})" for r in un]
+                       + [f"NON_PAPER {r['key']}: \"{r['title'][:100]}\" ({'; '.join(r['notes']) or 'no URL; confirm by hand'})" for r in np_]))
     pub = [r for r in results if r.get("published")]
     if pub:
         out.append(finding("I1", "INFO", f"{len(pub)} arXiv-only entries have a peer-reviewed version in DBLP",
@@ -246,10 +301,11 @@ def run(args, tex_rows, out_dir):
 
 
 def write_md(results, missing, path):
-    order = {"NOT_FOUND": 0, "CHECK_METADATA": 1, "NON_PAPER": 2, "VERIFIED": 3}
+    order = {"NOT_FOUND": 0, "UNCHECKED": 1, "CHECK_METADATA": 2, "NON_PAPER": 3, "VERIFIED": 4}
     lines = ["# Reference existence check (rule I1)", "",
              "Statuses: VERIFIED (title, first author, year agree), CHECK_METADATA (title found, author/year differ), "
-             "NOT_FOUND (confirm by hand), NON_PAPER (model card, law, website: confirm by hand). "
+             "NOT_FOUND (confirm by hand), UNCHECKED (an index refused or failed: re-run or confirm by hand), "
+             "NON_PAPER (model card, law, website: URL status shown; confirm by hand). "
              "PUBLISHED: an arXiv-only entry with a peer-reviewed version in DBLP.", ""]
     if missing:
         lines += ["Cited keys without a bib entry: " + ", ".join(missing), ""]

@@ -239,10 +239,12 @@ class Http:
         self.cache = json.loads(self.cache_path.read_text()) if self.cache_path and self.cache_path.exists() else {}
         self.intervals = intervals or {}
         self.last = {}
+        self.failed = {}  # host -> reason, for requests that never succeeded (rate limit, budget, network)
 
     def get(self, url, retries=4):
-        if url in self.cache:
-            return self.cache[url]
+        ck = re.sub(r"[&?](api_key|mailto)=[^&]*", "", url)  # never store credentials in the cache file
+        if ck in self.cache:
+            return self.cache[ck]
         host = urllib.parse.urlparse(url).netloc
         for attempt in range(retries):
             wait = self.intervals.get(host, 1.0) - (time.time() - self.last.get(host, 0))
@@ -253,21 +255,29 @@ class Http:
                 req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
                 with urllib.request.urlopen(req, timeout=30) as r:
                     body = r.read().decode("utf-8", errors="replace")
-                self.cache[url] = body
+                self.cache[ck] = body
+                self.failed.pop(host, None)
                 self._save()
                 return body
             except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    msg = e.read().decode("utf-8", errors="replace")[:200] if hasattr(e, "read") else ""
+                    if re.search(r"budget|quota|api key", msg, re.I):  # daily budget used up: retrying will not help
+                        self.failed[host] = "429 " + msg[:120]
+                        return None
                 if e.code in (429, 500, 502, 503, 504):
+                    self.failed[host] = f"HTTP {e.code}"
                     time.sleep(5 * (attempt + 1))
                     continue
                 if e.code == 404:
-                    self.cache[url] = ""
+                    self.cache[ck] = ""
                     self._save()
                     return ""
                 raise
-            except (urllib.error.URLError, TimeoutError):
+            except (urllib.error.URLError, TimeoutError) as e:
+                self.failed[host] = f"network: {e}"[:120]
                 time.sleep(5 * (attempt + 1))
-        return None  # network failure: not cached, so a re-run retries
+        return None  # failure: not cached, so a re-run retries
 
     def _save(self):
         if self.cache_path:
